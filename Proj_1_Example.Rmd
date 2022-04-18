@@ -1,0 +1,196 @@
+---
+title: "STA6235 Project 1"
+author: "Nate Heng"
+date: 'Last updated: `r Sys.Date()`'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(readr)
+library(tidyverse)
+library(VIM)
+library(moderndive)
+### p.value.string v2
+# by Reid Ginoza
+p.value.string = function(p.value){
+  p.value <- round(p.value, digits=4)
+  if (p.value == 0) {
+    return("p < 0.0001")
+  } else {
+    return(paste0("p = ", format(p.value, scientific = F)))
+  }
+}
+```
+
+### Data
+
+The dataset I am using is a subset of the **gapminder** dataset from the **gapminder** package. According to the help file for **gapminder**, the dataset is an "Excerpt of the Gapminder data on life expectancy, GDP per capita, and population by country." This excerpt is based on the data collection from [gapminder.org](https://www.gapminder.org/). The variables included in this dataset are country, continent, year of collection, life expectancy, population, and inflation-adjusted GDP per capita in US dollars. I have filtered the data to use only the most recent year of collected statistics (2007). I will be attempting to determine if inflation-adjusted GDP per capita in US dollars, or some transformation of that variable, is a signicant predictor of life expectancy in a country.
+
+Mean, median and standard deviation information for each numeric variable are shown below.  Counts by continent is also shown below.
+
+```{r}
+data(gapminder)
+gm_2007 <- gapminder %>% filter(year == max(year))
+mean_gm <- as.matrix(apply(gm_2007[,4:6], 2, mean), nrow = 1)
+median_gm <- as.matrix(apply(gm_2007[,4:6], 2, median), nrow = 1)
+sd <- as.matrix(apply(gm_2007[,4:6], 2, sd), nrow = 1)
+colnames(mean_gm) <- "Mean"
+colnames(median_gm) <- "Median"
+colnames(sd) <- "Standard Deviation"
+mean_gm
+median_gm
+sd
+table(gm_2007$continent)
+```
+
+**gdpPercap** has a mean value (`r format(round(mean_gm[3],2), scientific = FALSE)`) much higher than it's median (`r round(median_gm[3],2)`) indicating it has a heavy right tail.  This may mean it is not linear when measured against **lifeExp**. The standard deviation (`r format(round(sd[3],2), scientific = FALSE)`) is larger than the mean, and much larger than the median. This could indicate skewness and a wide dispersion of values. We can check for these graphically as well.
+
+```{r}
+ggplot(gm_2007, aes(x=gdpPercap)) +
+  geom_density()
+ggplot(gm_2007, aes(x=gdpPercap, y=lifeExp)) +
+  geom_point()
+
+```
+
+The above plots confirm the skewness of **gdpPercap**, and the heavy right tail..
+
+Perhaps a log transform of **gdpPercap** will help remedy this.  The mean, median and standard deviation of the transformed variable are shown below.  The new variable is titled: **gdpPercap_log**.
+
+```{r}
+gm_2007 <- gm_2007 %>% mutate(gdpPercap_log = log(gdpPercap))
+mean_loggdp <- mean(gm_2007$gdpPercap_log)
+names(mean_loggdp) <- "Mean of 'gdpPercap_log'"
+median_loggdp <- median(gm_2007$gdpPercap_log)
+names(median_loggdp) <- "Median of 'gdpPercap_log'"
+sd_loggdp <- sd(gm_2007$gdpPercap_log)
+names(sd_loggdp) <- "Standard Deviation of 'gdpPercap_log'"
+mean_loggdp
+median_loggdp
+sd_loggdp
+```
+
+**gdpPercap_log** has a mean value (`r round(mean_loggdp,2)`) much closer to it's median (`r round(median_loggdp,2)`) than **gdpPercap**, which might mean the heavy right tail has been tempered.  The standard deviation (`r round(sd_loggdp,2)`) is now much smaller than the mean value and median values which may also indicate the reduction in skewness. We will check for this graphically as well.
+
+```{r}
+ggplot(gm_2007, aes(x=gdpPercap_log)) +
+  geom_density()
+ggplot(gm_2007, aes(x=gdpPercap_log, y=lifeExp)) +
+  geom_point()
+```
+
+This transformation seems to have smoothed out some of the skewness.  I will use the log of inflation-adjusted GDP per capita in US dollars going forward as the dependent variable in the regression analysis and hypothesis testing.
+
+### Linear Regression
+
+I am attempting to estimate the following model based on the available data:
+
+$Y_i = \beta_0 + \beta_1X_i + \epsilon_i$
+
+Where $Y_i$ is the life expectancy of a country and $X_i$ is the log of inflation-adjusted GDP per capita in US dollars of that same country.
+
+The model estimate will be of the form:
+
+$\hat{Y_i} = b_0 + b_1X_i$
+
+Where $b_0$ is an estimate of $\beta_0$, $b_1$ is an estimate of $\beta_1$, and $\hat{Y_i}$ is the model estimate for $Y_i$.
+
+The linear regression model output is shown below.
+
+```{r}
+gm_model <- lm(lifeExp ~ gdpPercap_log, data = gm_2007)
+(output <- summary(gm_model))
+```
+
+The resulting linear regression line to estimate the true model is shown below.
+
+```{r}
+b_0 <- gm_model$coefficients[1]
+b_1 <- gm_model$coefficients[2]
+```
+
+\[ \hat{Y_i} = `r round(b_0, digits=4)` + `r round(b_1, digits=4)`X_i \]
+
+We can extract the $R^2$ value for the model from the model output shown earlier.  It is listed as 'Multiple R-squared' and the value is shown below.
+
+\[R^2 = `r output$r.squared` \]
+
+This indicates a somewhat strong positive correlation between the two variables.
+
+### Confidence Interval
+
+A 95% confidence interval can be calculated using the formula $b_1\pm{t_{1-\alpha/2,df-2}s_{b_1}}$ with $\alpha$=.05.
+
+```{r}
+one_ci <- as_tibble(confint(gm_model, level=0.95))
+```
+
+The resulting 95% confidence interval for $b_1$ is (`r round(one_ci$"2.5 %"[2], digits = 2)`, `r round(one_ci$"97.5 %"[2], digits = 2)`).
+
+### Hypothesis Test
+
+In order to test whether the log of inflation-adjusted GDP per capita in US dollars is a signicant predictor of life expectancy in a country we must construct the hypotheses as follows:
+
+$H_0: \beta_1 = 0$; the log of inflation-adjusted GDP per capita in US dollars is not a signicant predictor of life expectancy in a country.
+
+$H_1: \beta_1 \neq 0$; the log of inflation-adjusted GDP per capita in US dollars is a signicant predictor of life expectancy in a country.
+
+The regression output above provides a p-value for this hypothesis under 'Pr(>|t|)' we can compare this value for **gdpPercap_log** to $\alpha$ in order to determine the results of the test.  An $\alpha$ value of 0.05 will be used to remain consistent with above analysis.  The p-value and results of the test are displayed below.
+
+```{r}
+alpha <- 0.05
+p_value <- unname(output$coefficients[,4][2])
+```
+
+$`r p.value.string(p_value)`$.
+
+**Interpretation**
+
+If the p-value is less than $\alpha$, we reject $H_0$.  If the p-value is greater than or equal to $\alpha$, we fail to reject $H_0$.
+
+```{r}
+p_value < alpha
+```
+
+We reject $H_0: \beta_1 = 0$. There is sufficient evidence that the log of a country's inflation-adjusted GDP per capita in US dollars is a significant predictor of that country's average life expectancy
+
+### Visualization of the Data
+
+The graph below shows the log of inflation-adjusted GDP per capita in US dollars along the x-axis and life expectancy along the y-axis.  Each point represents a different country.  The blue line shows the regression line calculated above, and the gray bands display the 95% confidence interval calculated for each possible value of the log of inflation-adjusted GDP per capita in US dollars. The gray bands provide no room for a slope equal to zero, or a horizontal line, confirming our conclusion above that the log of inflation-adjusted GDP per capita in US dollars is a signicant predictor of life expectancy in a country.
+
+```{r, message=FALSE}
+ggplot(gm_2007, aes(x = gdpPercap_log, y = lifeExp)) + 
+  geom_point() + 
+  stat_smooth(data = gm_2007, mapping = aes(x = gdpPercap_log, y = lifeExp), level = 0.95, method = "lm") +
+  xlab("Log of inflation-adjusted GDP per capita in US dollars") + 
+  ylab("Life Expectancy") + 
+  ggtitle("2007 log of inflation-adjusted GDP per capita in US dollars vs. life expectancy") +
+  theme_classic()
+```
+
+The below plot shows how the regression line would be interpreted with actual GDP values prior to the log transform of the data (red line) compared against a linear regression of the data without performing a log transform (blue line).  Clearly transforming the data prior to performing a linear regression produces a better fit.
+
+```{r, message=FALSE}
+sample_loggdp <- seq(5,11, length.out = 500)
+sample_gdp <- exp(sample_loggdp)
+predict_life_exp <- predict(gm_model, newdata = data.frame("gdpPercap_log" = sample_loggdp))
+sample_df <- data.frame("GDP" = sample_gdp,"predictions" = predict_life_exp)
+colors <- c("Log Transform" = "red", "No Log Transform" = "blue")
+
+ggplot(gm_2007, aes(x = gdpPercap, y = lifeExp)) + 
+  geom_point() + 
+  geom_path(data = sample_df, mapping = aes(x = GDP, y = predict_life_exp, color = "Log Transform"), color = "red", size = 1) +
+  stat_smooth(data = gm_2007, mapping = aes(x = gdpPercap, y = lifeExp, color = "No Log Transform"), se = FALSE, method = "lm") +
+  labs(x ="Inflation-adjusted GDP per capita in US dollars", y = "Life Expectancy", color = "Legend") +
+  scale_color_manual(values = colors) +
+  ggtitle("2007 inflation-adjusted GDP per capita in US dollars vs. life expectancy") +
+  theme_classic()
+```
+
+### Conclusion
+
+Based on the above findings it can be said that the log of inflation-adjusted GDP per capita in US dollars is a signicant predictor of life expectancy in a country for 2007.  However, further analysis would need to be done to determine if this relationship can be applied to other years.

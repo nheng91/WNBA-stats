@@ -1,0 +1,60 @@
+---
+title: "Project_2_NH"
+author: "Nate Heng"
+date: 'Last updated: `r Sys.Date()`'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(readr)
+library(tidyverse)
+library(VIM)
+library(moderndive)
+### p.value.string v2
+# by Reid Ginoza
+p.value.string = function(p.value){
+  p.value <- round(p.value, digits=4)
+  if (p.value == 0) {
+    return("p < 0.0001")
+  } else {
+    return(paste0("p = ", format(p.value, scientific = F)))
+  }
+}
+```
+
+### Data
+
+```{r, message=FALSE, warning=FALSE}
+wnba <- read.csv("wnba-player-stats.csv")
+wnba_filtered <- wnba %>% filter(year_ID >= 2000, MP > 100) %>% 
+  mutate(decade = case_when(
+           year_ID >=2000 & year_ID < 2010 ~ "2000s",
+           year_ID >=2010 ~ "2010s"), 
+         court_position = case_when(
+           Pos == "G" ~ "Back",
+           Pos == "G-F" ~ "Back",
+           Pos == "F" ~ "Front",
+           Pos == "C" ~ "Front",
+           Pos == "F-G" ~ "Front",
+           Pos == "F-C" ~ "Front",
+           Pos == "C-F" ~ "Front"),
+         TRB_pct_scaled = scale(TRB_pct),
+         AST_pct_scaled = scale(AST_pct),
+         BLK_pct_scaled = scale(BLK_pct),
+         ThrPAr_scaled = scale(ThrPAr))
+wnba_imputed <- kNN(wnba_filtered, variable = "court_position", dist_var = c("TRB_pct_scaled", "AST_pct_scaled", "BLK_pct_scaled", "ThrPAr_scaled"))
+wnba_final <- wnba_imputed %>% select(TS_pct, decade, court_position, Tm_Net_Rtg, Age)
+wnba_final %>% is.na() %>% colSums()
+```
+
+
+### Multiple Linear Regression
+
+```{r}
+wnba_full_mod <- lm(TS_pct ~ decade*court_position + Tm_Net_Rtg + Age, data = wnba_final)
+summary(wnba_full_mod)
+```
