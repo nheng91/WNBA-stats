@@ -26,7 +26,16 @@ p.value.string = function(p.value){
 }
 ```
 
-### Data
+## Data
+
+The dataset I am using for the below analysis is from the [WNBA-stats](https://github.com/fivethirtyeight/WNBA-stats) repository maintained by [FiveThiryEight](https://github.com/fivethirtyeight), specifically the [WNBA Player Stats csv](https://github.com/fivethirtyeight/WNBA-stats/blob/master/wnba-player-stats.csv).  The data set contains statistics (various shooting percentages, assists, rebounds, etc.) on players for each season between 1997 and 2019.  The goal of this analysis will be to determine if a subset of the variables found within the data set is predictive of a player's **'Player Efficiency Rating'** or **(PER)**.  Player Efficiency Rating is an overall measure of a player's production and encompasses specific statistics like shooting percentages, assists, turnovers, and others within its [calculation](https://en.wikipedia.org/wiki/Player_efficiency_rating).  Since **PER** compounds several of a player's on-court statistics into one overall statistic I will look at other potential predictors that do not utilize them.  The variables that will be assessed as predictors are below:
+
+* **Age**: Age of player during season
+* **Decade**: Decade of season (2000s or 2010)
+* **Court Position**: Front or Back Court. Guards are considered back court players while Forwards and Centers are considered front court players
+* **Team Net Efficiency Rating**: A similar metric to **PER**, but at the team level.  The Team Net Efficiency Rating will be used as a measure of how good or bad a player's team is during a given year.
+
+The data set was initially filtered to exclude player's who played less than 100 minutes during a season because anything under 100 minutes would not be a large enough sample size for a reliable calculation.  Any seasons prior to 2000 were also dropped to allow the data set to contain to full decades for testign. The decade of a player was created to be a categorical variable placing years 2000-2009 in the '2000s' decade and years 2010-2019 in the '2010s' decade.  Court position was another created variable to decrease to 2 the number of categories a player's position could fall under. The data set had a few missing values for court position, so the missing values were imputed based a player's rebound percentage, assist percentage, block percentage, and three point percentage.  The code to create these variables as well as confirmation of no missing values after imputation is shown below.
 
 ```{r, message=FALSE, warning=FALSE}
 wnba <- read.csv("wnba-player-stats.csv")
@@ -47,14 +56,95 @@ wnba_filtered <- wnba %>% filter(year_ID >= 2000, MP > 100) %>%
          BLK_pct_scaled = scale(BLK_pct),
          ThrPAr_scaled = scale(ThrPAr))
 wnba_imputed <- kNN(wnba_filtered, variable = "court_position", dist_var = c("TRB_pct_scaled", "AST_pct_scaled", "BLK_pct_scaled", "ThrPAr_scaled"))
-wnba_final <- wnba_imputed %>% select(TS_pct, decade, court_position, Tm_Net_Rtg, Age)
+wnba_final <- wnba_imputed %>% select(PER, decade, court_position, Tm_Net_Rtg, Age)
 wnba_final %>% is.na() %>% colSums()
 ```
 
+## Multiple Linear Regression
 
-### Multiple Linear Regression
+### Full Model
 
 ```{r}
-wnba_full_mod <- lm(TS_pct ~ decade*court_position + Tm_Net_Rtg + Age, data = wnba_final)
+wnba_full_mod <- lm(PER ~ decade*court_position + Tm_Net_Rtg + Age, data = wnba_final)
 summary(wnba_full_mod)
 ```
+
+### Reduced Model without Interaction of Decade and Court Position (Reduced Model #1)
+
+```{r}
+wnba_reduced_mod1 <- lm(PER ~ decade + court_position + Tm_Net_Rtg + Age, data = wnba_final)
+summary(wnba_reduced_mod1)
+```
+
+### Anova for Full Model vs Reduced Model #1
+
+```{r}
+anova(wnba_reduced_mod1, wnba_full_mod)
+```
+
+### Reduced Model dropping both Age, Net Team Rating, and the interaction between Decade and Court Position (Reduced Model #2)
+
+```{r}
+wnba_reduced_mod2 <- lm(PER ~ decade + court_position, data = wnba_final)
+summary(wnba_reduced_mod2)
+```
+
+### Anova for Reduced Model #1 and Reduced Model #2
+
+```{r}
+anova(wnba_reduced_mod2, wnba_reduced_mod1)
+```
+
+### Reduced Model dropping Age and the interaction between Decade and Court Position (Reduced Model #3)
+
+```{r}
+wnba_reduced_mod3 <- lm(PER ~ decade + court_position + Tm_Net_Rtg, data = wnba_final)
+summary(wnba_reduced_mod3)
+```
+
+### Anova for Reduced Model #1 and Reduced Model #3
+
+```{r}
+anova(wnba_reduced_mod3, wnba_reduced_mod1)
+```
+
+### Reduced Model dropping Age, Decade, and the interaction between Decade and Court Position (Reduced Model #4)
+
+```{r}
+wnba_reduced_mod4 <- lm(PER ~ court_position + Tm_Net_Rtg, data = wnba_final)
+summary(wnba_reduced_mod4)
+```
+
+### Anova for Reduced Model #1 and Reduced Model #3
+
+```{r}
+anova(wnba_reduced_mod4, wnba_reduced_mod3)
+```
+
+### Final Model
+
+```{r}
+final_model <- lm(PER ~ court_position + Tm_Net_Rtg, data = wnba_final)
+summary(final_model)
+```
+
+## Data Visualization
+
+```{r}
+final_model_predict <- expand.grid("court_position" = levels(as.factor(wnba_final$court_position)),
+                                   "Tm_Net_Rtg" = seq(-20, 20, length.out = 501)) 
+final_model_predict$PER <- predict(final_model, newdata = final_model_predict)
+```
+
+```{r}
+ggplot(wnba_final, aes(x = Tm_Net_Rtg, y = PER, color = court_position)) +
+  geom_point(alpha = 0.25) + 
+  geom_line(data = final_model_predict, aes(x = Tm_Net_Rtg, y = PER, color = court_position), lwd = 1.25) +
+  scale_fill_manual(name = "Court Position", labels = c("Back Court", "Front Court"), values = c("salmon", "cyan4")) +
+  scale_color_manual(name = "Court Position", labels = c("Back Court", "Front Court"), values = c("salmon", "cyan4")) +
+  xlab("Team Net Efficiency Rating") + 
+  ylab("Player Efficiency Rating") + 
+  ggtitle("WNBA Player Efficiency Rating as a function of Team Net Efficiency Rating \nand Court Position for 2000-2019")
+
+```
+
