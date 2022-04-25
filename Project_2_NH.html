@@ -172,7 +172,7 @@ pre code {
 
 <h1 class="title toc-ignore">Project 2</h1>
 <h4 class="author">Nate Heng</h4>
-<h4 class="date">Last updated: 2022-04-23</h4>
+<h4 class="date">Last updated: 2022-04-25</h4>
 
 </div>
 
@@ -203,7 +203,7 @@ p.value.string = function(p.value){
 <li><strong>Court Position</strong>: Front or Back Court. Guards are considered back court players while Forwards and Centers are considered front court players</li>
 <li><strong>Team Net Efficiency Rating</strong>: A similar metric to <strong>PER</strong>, but at the team level. The Team Net Efficiency Rating will be used as a measure of how good or bad a player’s team is during a given year.</li>
 </ul>
-<p>The data set was initially filtered to exclude player’s who played less than 100 minutes during a season because anything under 100 minutes would not be a large enough sample size for a reliable calculation, and any age lower than the minimum allowable age by the WNBA was dropped as well. Any seasons prior to 2000 were also dropped to allow the data set to contain two full decades for testing. The decade of a player was created to be a categorical variable placing years 2000-2009 in the ‘2000s’ decade and years 2010-2019 in the ‘2010s’ decade. Court position was another created variable to decrease to 2 the number of categories a player’s position could fall under. The data set had a few missing values for court position, so the missing values were imputed based a player’s rebound percentage, assist percentage, block percentage, and three point percentage. The code to create these variables as well as confirmation of no missing values after imputation is shown below.</p>
+<p>The data set was initially filtered to exclude player’s who played less than 100 minutes during a season because anything under 100 minutes would not be a large enough sample size for a reliable calculation, and any age lower than the minimum allowable age by the WNBA was dropped as well. Any seasons prior to 2000 were also dropped to allow the data set to contain two full decades for testing. The decade of a player was created to be a categorical variable placing years 2000-2009 in the ‘2000s’ decade and years 2010-2019 in the ‘2010s’ decade. Court position was another created variable to decrease to 2 the number of categories a player’s position could fall under. The data set had a few missing values for court position, so the missing values were imputed based on a player’s rebound percentage, assist percentage, block percentage, and three point percentage. The code to create these variables as well as confirmation of no missing values after imputation is shown below.</p>
 <pre class="r"><code>wnba &lt;- read.csv(&quot;wnba-player-stats.csv&quot;)
 wnba_filtered &lt;- wnba %&gt;% filter(year_ID &gt;= 2000, MP &gt; 100, Age &gt;= 18) %&gt;% 
   mutate(decade = case_when(
@@ -382,7 +382,7 @@ Age
 </tr>
 </tbody>
 </table>
-<p>Each variable has a mean that is very close to its median indicating a lack of skewness within each variable. PER has a mean/median of 13.482/13 and standard deviation of 5.426 which suggests most of the values lie between 2 and 24 with some outliers of extremely good and extremely bad players. Team Net Rating has a mean of -.222/.2 and standard deviation of 6.028 which suggests most of the values lie between -12 and 12 with some outliers for extremely good and extremely bad teams. Age has a mean of 26.556/26 and standard deviation of 3.96 which suggests most of the values lie between 19 and 34 with outliers of some older players.</p>
+<p>Each variable has a mean that is very close to its median indicating a lack of skewness within the data. PER has a mean/median of 13.482/13 and standard deviation of 5.426 which suggests most of the values lie between 2 and 24 with some outliers of extremely good and extremely bad players. Team Net Rating has a mean of -.222/.2 and standard deviation of 6.028 which suggests most of the values lie between -12 and 12 with some outliers for extremely good and extremely bad teams. Age has a mean of 26.556/26 and standard deviation of 3.96 which suggests most of the values lie between 19 and 34 with outliers of some older players.</p>
 <p>Frequency Tables for both categorical variables (Decade and Court Position) are shown below.</p>
 <pre class="r"><code>decade_tab &lt;- ctab(table(wnba_categorical$decade))
 decade_df &lt;- data.frame(rownames(decade_tab$ctab), unname(decade_tab$ctab[,1]), round(unname(decade_tab$ctab[,2]),1))
@@ -600,7 +600,7 @@ summary(wnba_reduced_mod2)</code></pre>
 <span class="math inline">\(H_1:\)</span>  at least one of <span class="math inline">\(\beta_{\text{Age}}\)</span>,<span class="math inline">\(\beta_{\text{TeamNetRating}}\)</span> is <span class="math inline">\(\ne 0\)</span><br />
 </p>
 <p><strong>Anova for Reduced Model #1 vs Reduced Model #2</strong></p>
-<p>Since we know the interaction term not not be significant <strong>Reduced Model #1</strong> will now be the model tested against. We will assume the interaction term has been dropped for the remainder of the analysis. The results of the above hypothesis test will be displayed in the anova output below.</p>
+<p>Since we know the interaction term not not be significant, <strong>Reduced Model #1</strong> will now be the model tested against. We will assume the interaction term has been dropped for the remainder of the analysis. The results of the above hypothesis test will be displayed in the anova output below.</p>
 <pre class="r"><code>(anova_red1 &lt;- anova(wnba_reduced_mod2, wnba_reduced_mod1))</code></pre>
 <pre><code>## Analysis of Variance Table
 ## 
@@ -622,7 +622,7 @@ summary(wnba_reduced_mod2)</code></pre>
 </div>
 <div id="hypothesis-test-on-dropping-decade" class="section level3">
 <h3>Hypothesis Test on Dropping Decade</h3>
-<p>Given the results of the last test the working model is still <strong>Reduced Model #1</strong>. I will now attempt to drop variables from the model one at a time based on their descending p-values. From the <strong>Reduced Model #1</strong> output we see decade has the highest p-value, <span class="math inline">\(p = 0.6771\)</span>. The reduced form of the model that does not include decade is shown below.</p>
+<p>Given the results of the last test, the working model is still <strong>Reduced Model #1</strong>. I will now attempt to drop variables from the model one at a time based on their descending p-values. From the <strong>Reduced Model #1</strong> output we see decade has the highest p-value, <span class="math inline">\(p = 0.6771\)</span>. The reduced form of the model that does not include decade is shown below.</p>
 <p><span class="math inline">\(\hat{Y_{\text{i,PER}}} = b_0 + b_{\text{CourtPosition}}X_{\text{i,CourtPosition}} + b_{\text{TeamNetRating}}X_{\text{i,TeamNetRating}} + b_{\text{Age}}X_{\text{i,Age}}\)</span></p>
 <p>A summary of the third reduced multiple linear regression model (<strong>Reduced Model #3</strong>) and the resulting model fit are given below.</p>
 <pre class="r"><code>wnba_reduced_mod3 &lt;- lm(PER ~ court_position + Tm_Net_Rtg + Age, data = wnba_final)
@@ -671,7 +671,7 @@ summary(wnba_reduced_mod3)</code></pre>
 <p><strong>Rejection Region</strong></p>
 <p>Reject <span class="math inline">\(H_0\)</span> if <span class="math inline">\(p &lt; \alpha\)</span>; <span class="math inline">\(\alpha = 0.05\)</span></p>
 <p><strong>Conclusion and Interpretation</strong></p>
-<p>Fail to reject <span class="math inline">\(H_0\)</span>. There is not sufficient evidence to suggest that decade is a significant predictor of player efficiency rating. <strong>Reduced Model #3</strong> will now be the working model and we will assume decade to be dropped for the remainder of the analysis.</p>
+<p>Fail to reject <span class="math inline">\(H_0\)</span>. There is not sufficient evidence to suggest that decade is not a significant predictor of player efficiency rating. <strong>Reduced Model #3</strong> will now be the working model and we will assume decade to be dropped for the remainder of the analysis.</p>
 </div>
 </div>
 <div id="final-model" class="section level2">
