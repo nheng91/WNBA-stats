@@ -1,0 +1,330 @@
+---
+title: "Project 3"
+author: "Nate Heng"
+date: 'Last updated: `r Sys.Date()`'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width=12, fig.height=8)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(readr)
+library(tidyverse)
+library(VIM)
+library(moderndive)
+library(broom)
+library(kableExtra)
+library(catspec)
+library(olsrr)
+library(MASS)
+### almost_sas function from class
+almost_sas <- function(aov.results){
+  aov_residuals <- residuals(aov.results)
+  par(mfrow=c(2,2))
+  plot(aov.results, which=1)
+  hist(aov_residuals)
+  plot(aov.results, which=2)
+  plot(density(aov_residuals))
+}
+```
+
+# Data
+
+The dataset I am using for the below analysis is from the [WNBA-stats](https://github.com/fivethirtyeight/WNBA-stats) repository maintained by [FiveThiryEight](https://github.com/fivethirtyeight), specifically the [WNBA Player Stats csv](https://github.com/fivethirtyeight/WNBA-stats/blob/master/wnba-player-stats.csv).  The data set contains statistics (various shooting percentages, assists, rebounds, etc.) on players for each season between 1997 and 2019.  The goal of this analysis will be to determine if a subset of the variables found within the data set is predictive of a player's **'Player Efficiency Rating'** or **(PER)**.  Player Efficiency Rating is an overall measure of a player's production and encompasses specific statistics like shooting percentages, assists, turnovers, and others within its [calculation](https://en.wikipedia.org/wiki/Player_efficiency_rating).  Since **PER** compounds several of a player's on-court statistics into one overall statistic I will look at other potential predictors that do not utilize them.  The variables that will be assessed as predictors are below:
+
+* **Age**: Age of player during season
+* **Decade**: Decade of season (2000s or 2010)
+* **Court Position**: Front or Back Court. Guards are considered back court players while Forwards and Centers are considered front court players
+* **Team Net Efficiency Rating**: A similar metric to **PER**, but at the team level.  The Team Net Efficiency Rating will be used as a measure of how good or bad a player's team is during a given year.
+
+The data set was initially filtered to exclude player's who played less than 100 minutes during a season because anything under 100 minutes would not be a large enough sample size for a reliable calculation, and any age lower than the minimum allowable age by the WNBA was dropped as well.  Any seasons prior to 2000 were also dropped to allow the data set to contain two full decades for testing. The decade of a player was created to be a categorical variable placing years 2000-2009 in the '2000s' decade and years 2010-2019 in the '2010s' decade.  Court position was another created variable to decrease to 2 the number of categories a player's position could fall under. The data set had a few missing values for court position, so the missing values were imputed based on a player's rebound percentage, assist percentage, block percentage, and three point percentage.  The code to create these variables as well as confirmation of no missing values after imputation is shown below.
+
+```{r, message=FALSE, warning=FALSE}
+wnba <- read.csv("wnba-player-stats.csv")
+wnba_filtered <- wnba %>% filter(year_ID >= 2000, MP > 100, Age >= 18) %>% 
+  mutate(decade = case_when(
+           year_ID >=2000 & year_ID < 2010 ~ "2000s",
+           year_ID >=2010 ~ "2010s"), 
+         court_position = case_when(
+           Pos == "G" ~ "Back",
+           Pos == "G-F" ~ "Back",
+           Pos == "F" ~ "Front",
+           Pos == "C" ~ "Front",
+           Pos == "F-G" ~ "Front",
+           Pos == "F-C" ~ "Front",
+           Pos == "C-F" ~ "Front"),
+         TRB_pct_scaled = scale(TRB_pct),
+         AST_pct_scaled = scale(AST_pct),
+         BLK_pct_scaled = scale(BLK_pct),
+         ThrPAr_scaled = scale(ThrPAr))
+wnba_imputed <- kNN(wnba_filtered, variable = "court_position", dist_var = c("TRB_pct_scaled", "AST_pct_scaled", "BLK_pct_scaled", "ThrPAr_scaled"))
+wnba_final <- wnba_imputed %>% dplyr::select(PER, decade, court_position, Tm_Net_Rtg, Age)
+wnba_final_na <-  wnba_final %>% is.na() %>% colSums()
+knitr::kable(wnba_final_na, col.names = "", caption = "**# of NAs by Variable**") %>% kable_styling()
+```
+
+## Summary Statistics
+
+```{r}
+wnba_numeric <- wnba_final %>% select_if(is.numeric)
+wnba_categorical <- wnba_final %>% select_if(is.character)
+wnba_means <- round(apply(wnba_numeric, 2, mean),3)
+wnba_sd <- round(apply(wnba_numeric, 2, sd),3)
+wnba_median <- round(apply(wnba_numeric, 2, median),3)
+wnba_min <- round(apply(wnba_numeric, 2, min),3)
+wnba_max <- round(apply(wnba_numeric, 2, max),3)
+wnba_numeric_summary <- data.frame(cbind(c("Player Efficiency Rating", "Team Net Efficiency Rating", "Age"), unname(wnba_means), unname(wnba_median), unname(wnba_sd), unname(wnba_min), unname(wnba_max)))
+colnames(wnba_numeric_summary) <- c("Variable", "Mean", "Median", "Standard Deviation", "Min", "Max")
+```
+
+Summary Statistics (Mean, Median, Standard Deviation, Min, Max) for the continuous variables (PER, Team Net Rating, Age) are shown in the below table.
+
+```{r}
+knitr::kable(wnba_numeric_summary, caption = "**Continuous Predictors**") %>% kable_styling(full_width = F, position = "left")
+```
+
+Each variable has a mean that is very close to its median indicating a lack of skewness within the data.  PER has a mean/median of 13.482/13 and standard deviation of 5.426 which suggests most of the values lie between 2 and 24 with some outliers of extremely good and extremely bad players.  Team Net Rating has a mean of -.222/.2 and standard deviation of 6.028 which suggests most of the values lie between -12 and 12 with some outliers for extremely good and extremely bad teams. Age has a mean of 26.556/26 and standard deviation of 3.96 which suggests most of the values lie between 19 and 34 with outliers of some older players.
+
+Frequency Tables for both categorical variables (Decade and Court Position) are shown below.  
+
+```{r}
+decade_tab <- ctab(table(wnba_categorical$decade))
+decade_df <- data.frame(rownames(decade_tab$ctab), unname(decade_tab$ctab[,1]), round(unname(decade_tab$ctab[,2]),1))
+cp_tab <- ctab(table(wnba_categorical$court_position))
+cp_df <- data.frame(rownames(cp_tab$ctab), unname(cp_tab$ctab[,1]), round(unname(cp_tab$ctab[,2]),1))
+knitr::kable(decade_df, col.names = c("Decade", "Frequency", "Percentage of Observations")) %>% kable_styling(full_width = F, position = "left")
+knitr::kable(cp_df, col.names = c("Court Position", "Frequency", "Percentage of Observations")) %>% kable_styling(full_width = F, position = "left")
+```
+
+Each variable is relatively balanced between levels.
+
+# Model Comparison
+
+The analysis will compare two models using the model evaluation criterion of $AIC$ and $R_{adj}^2$. The two models being compared are described below. 
+
+## Full Model
+
+The full model uses decade, court position, team net rating, player age and an interaction between decade and court position to estimate a player's efficiency rating.  The 2000s decade will be the base level for the decade variable, and Back will be the base level for the court position variable.  This will persist throughout the analysis.  This means the $X_{Decade}$ variable will be 1 when the decade is 2010s and 0 when the decade is 2000s, and the $X_{CourtPosition}$ variable will be 1 when the court position is Front and 0 when the court position is Back.
+
+The estimated model is as follows:
+
+$\hat{Y_{\text{i,PER}}} = b_0 + b_{\text{Decade}}X_{\text{i,Decade}} + b_{\text{CourtPosition}}X_{\text{i,CourtPosition}} + b_{\text{TeamNetRating}}X_{\text{i,TeamNetRating}} + b_{\text{Age}}X_{\text{i,Age}}  + b_{\text{Decade x CourtPosition}}X_{\text{i,Decade}}X_{\text{i,CourtPosition}}$
+
+A summary of the full multiple linear regression model and the resulting model fit are given below.
+
+```{r}
+wnba_full_mod <- lm(PER ~ decade*court_position + Tm_Net_Rtg + Age, data = wnba_final)
+coef_full <- tidy(wnba_full_mod)$estimate
+summary(wnba_full_mod)
+```
+**Full Model Estimate:**
+
+$\hat{Y_{\text{i,PER}}} = `r round(coef_full[1], digits=2)` - `r -1*round(coef_full[2], digits=2)`X_{\text{i,Decade}} + `r round(coef_full[3], digits=2)`X_{\text{i,CourtPosition}} + `r round(coef_full[4], digits=2)`X_{\text{i,TeamNetRating}} + `r round(coef_full[5], digits=2)`X_{\text{i,Age}}  + `r round(coef_full[6], digits=2)`X_{\text{i,Decade}}X_{\text{i,CourtPosition}}$
+
+## Reduced Model
+
+The reduced model will drop the interaction term between decade and court position. The reduced form of the model that does not include the interaction term is shown below.
+
+$\hat{Y_{\text{i,PER}}} = b_0 + b_{\text{Decade}}X_{\text{i,Decade}} + b_{\text{CourtPosition}}X_{\text{i,CourtPosition}} + b_{\text{TeamNetRating}}X_{\text{i,TeamNetRating}} + b_{\text{Age}}X_{\text{i,Age}}$
+
+A summary of the reduced multiple linear regression model (**Reduced Model**) and the resulting model fit are given below.
+
+```{r}
+wnba_reduced_mod <- lm(PER ~ decade + court_position + Tm_Net_Rtg + Age, data = wnba_final)
+coef_red1 <- tidy(wnba_reduced_mod)$estimate
+summary(wnba_reduced_mod)
+```
+
+**Reduced Model #1 Estimate:**
+
+$\hat{Y_{\text{i,PER}}} = `r round(coef_red1[1], digits=2)` + `r round(coef_red1[2], digits=2)`X_{\text{i,Decade}} + `r round(coef_red1[3], digits=2)`X_{\text{i,CourtPosition}} + `r round(coef_red1[4], digits=2)`X_{\text{i,TeamNetRating}} + `r round(coef_red1[5], digits=2)`X_{\text{i,Age}}$
+
+
+## Model Comparison Statistics
+
+A table containing both $AIC$ and $R_{adj}^2$ values for each model is shown below.
+
+```{r}
+Model_Name <- c("Full Model", "Reduced Model")
+AIC_mod <- c(ols_aic(wnba_full_mod, method = "SAS"), ols_aic(wnba_reduced_mod, method = "SAS"))
+Adj_r2 <- c(summary(wnba_full_mod)$adj.r.squared, summary(wnba_reduced_mod)$adj.r.squared)
+model_df <- data.frame(Model_Name, AIC_mod, Adj_r2)
+knitr::kable(model_df, col.names = c("Model", "AIC", "Adjusted R-Squared")) %>% kable_styling(full_width = F, position = "left")
+```
+
+Both the $AIC$ value and the $R_{adj}^2$ value for the full model are slightly better than for the model without the interaction term, so both criterion values are in agreement that the full model would be considered a better fit to the data.  This is in opposition to the results of project 2 where the interaction term was dropped in favor of the reduced model as a result of an F-test comparing the two models.  Based on the results of the above model comparison statistics, the **Full Model** will be considered the "best model" going forward. 
+
+# Model Diagnostics
+
+## Outliers
+
+### Outliers in Y
+
+```{r}
+student_res <- studres(wnba_full_mod)
+outlier_flag <- as.factor(ifelse(abs(student_res) > 3, "Outlier", "Normal"))
+student_res_df <- data.frame("obs" = 1:length(student_res), student_res, outlier_flag)
+student_res_outlier_df <- student_res_df %>% filter(outlier_flag == "Outlier")
+knitr::kable(table(outlier_flag), col.names = c("Obs. Type", "Freq")) %>% kable_styling(full_width = F, position = "left")
+ggplot(student_res_df, aes(x = obs, y = student_res, col = outlier_flag)) + 
+  geom_point() + 
+  geom_hline(yintercept = 3, color = "red") +
+  geom_hline(yintercept = -3, color = "red") +
+  geom_text(data = student_res_outlier_df, aes(obs+70, student_res, label = obs), show.legend = FALSE) +
+  scale_color_manual(values = c("black", "red")) + 
+  scale_y_continuous(breaks=seq(-4,4,by=1)) + 
+  labs(x = "Observation", y = "Deleted Student Residual", color = "Observation Type") +
+  theme_classic()
+```
+
+### Outliers in X
+
+**Reduced Model #2 Estimate:**
+
+$\hat{Y_{\text{i,PER}}} = `r round(coef_red2[1], digits=2)` + `r round(coef_red2[2], digits=2)`X_{\text{i,Decade}} + `r round(coef_red2[3], digits=2)`X_{\text{i,CourtPosition}}$
+
+**Hypotheses**
+
+$H_0: \ \beta_{\text{Age}} = \beta_{\text{TeamNetRating}} = 0$ \
+$H_1:$ \ at least one of $\beta_{\text{Age}}$,$\beta_{\text{TeamNetRating}}$ is $\ne 0$ \
+
+**Anova for Reduced Model #1 vs Reduced Model #2**
+
+Since we know the interaction term not not be significant, **Reduced Model #1** will now be the model tested against. We will assume the interaction term has been dropped for the remainder of the analysis. The results of the above hypothesis test will be displayed in the anova output below.
+
+```{r}
+(anova_red1 <- anova(wnba_reduced_mod2, wnba_reduced_mod1))
+```
+
+**Test Statistic**
+
+$F_0 = `r round(tidy(anova_red1)[2, 5], digits=4)`$
+
+***p*-value**
+
+$`r p.value.string(tidy(anova_red1)$p.value[2])`$
+
+**Rejection Region**
+
+Reject $H_0$ if $p < \alpha$; $\alpha = 0.05$
+
+**Conclusion and Interpretation**
+
+Reject $H_0$. There is sufficient evidence to suggest that at least one of the continuous predictors (age and team net efficiency rating) are a significant predictor of player efficiency rating.  Both predictors cannot be simultaneously dropped from the model. 
+
+### Hypothesis Test on Dropping Decade
+
+Given the results of the last test, the working model is still **Reduced Model #1**. I will now attempt to drop variables from the model one at a time based on their descending p-values.  From the **Reduced Model #1** output we see decade has the highest p-value, $`r p.value.string(tidy(wnba_reduced_mod1)$p.value[2])`$. The reduced form of the model that does not include decade is shown below.
+
+$\hat{Y_{\text{i,PER}}} = b_0 + b_{\text{CourtPosition}}X_{\text{i,CourtPosition}} + b_{\text{TeamNetRating}}X_{\text{i,TeamNetRating}} + b_{\text{Age}}X_{\text{i,Age}}$
+
+A summary of the third reduced multiple linear regression model (**Reduced Model #3**) and the resulting model fit are given below.
+
+```{r}
+wnba_reduced_mod3 <- lm(PER ~ court_position + Tm_Net_Rtg + Age, data = wnba_final)
+coef_red3 <- tidy(wnba_reduced_mod3)$estimate
+summary(wnba_reduced_mod3)
+```
+
+**Reduced Model #3 Estimate:**
+
+$\hat{Y_{\text{i,PER}}} = `r round(coef_red3[1], digits=2)` + `r round(coef_red3[2], digits=2)`X_{\text{i,CourtPosition}} + `r round(coef_red3[3], digits=2)`X_{\text{i,TeamNetRating}} + `r round(coef_red3[4], digits=2)`X_{\text{i,Age}}$
+
+**Hypotheses**
+
+$H_0: \ \beta_{\text{Decade}} = 0$ \
+$H_1: \ \beta_{\text{Decade}} \ne 0$ \
+
+**Anova for Reduced Model #1 vs Reduced Model #3**
+
+The results of the above hypothesis test will be displayed in the anova output below.
+
+```{r}
+(anova_red2 <- anova(wnba_reduced_mod3, wnba_reduced_mod1))
+```
+
+**Test Statistic**
+
+$F_0 = `r round(tidy(anova_red2)[2, 5], digits=4)`$
+
+***p*-value**
+
+$`r p.value.string(tidy(anova_red2)$p.value[2])`$
+
+**Rejection Region**
+
+Reject $H_0$ if $p < \alpha$; $\alpha = 0.05$
+
+**Conclusion and Interpretation**
+
+Fail to reject $H_0$. There is not sufficient evidence to suggest that decade is not a significant predictor of player efficiency rating.  **Reduced Model #3** will now be the working model and we will assume decade to be dropped for the remainder of the analysis.
+
+## Final Model
+
+The output from **Reduced Model #3** shows each predictor to be significant at $\alpha = 0.05$, so we will use this as the **Final Model.**  The **Final Model** form is:
+
+$\hat{Y_{\text{i,PER}}} = b_0 + b_{\text{CourtPosition}}X_{\text{i,CourtPosition}} + b_{\text{TeamNetRating}}X_{\text{i,TeamNetRating}} + b_{\text{Age}}X_{\text{i,Age}}$
+
+The summary output and **Final Model** estimate are shown below.  The p-values for each predictor are shown in the **'Pr(>|t|)'** column of the summary output, and they are all significant as mentioned above.
+
+```{r}
+final_model <- lm(PER ~ court_position + Tm_Net_Rtg + Age, data = wnba_final)
+coef_final <- tidy(final_model)$estimate
+summary(final_model)
+```
+
+**Final Model Estimate:**
+
+$\hat{Y_{\text{i,PER}}} = `r round(coef_red3[1], digits=2)` + `r round(coef_red3[2], digits=2)`X_{\text{i,CourtPosition}} + `r round(coef_red3[3], digits=2)`X_{\text{i,TeamNetRating}} + `r round(coef_red3[4], digits=2)`X_{\text{i,Age}}$
+
+# Data Visualization
+
+The final model predicts PER as a function of 3 variables (Team Net Efficiency Rating, Age, and Court position), 2 of which are continuous (Team Net Efficiency Rating and Age). Two continuous variables complicates the ability to represent the full model graphically.  Therefore, Age will be treated as a categorical variable in the visualization with breakpoints at the 10th, 50th, and 90th percentile to demonstrate the movement as age increases.  Typically, I would use the 25th, 50th, and 75th percentiles for breakpoints, but they did not create enough visual separation when displayed in the final output.  The visualization of the **Final Model** is shown below.
+
+```{r}
+final_model_predict <- expand.grid("court_position" = levels(as.factor(wnba_final$court_position)),
+                                   "Tm_Net_Rtg" = seq(-20, 20, length.out = 201),
+                                   "Age" = quantile(wnba_final$Age, c(0.1,.5,0.9))) 
+final_model_predict$PER <- predict(final_model, newdata = final_model_predict)
+final_model_predict <- final_model_predict %>% mutate(age_court_pos = case_when(
+                                                      Age == 22 & court_position == "Back" ~ "Age22_Back",
+                                                      Age == 22 & court_position == "Front" ~ "Age22_Front",
+                                                      Age == 26 & court_position == "Back" ~ "Age26_Back",
+                                                      Age == 26 & court_position == "Front" ~ "Age26_Front",
+                                                      Age == 32 & court_position == "Back" ~ "Age32_Back",
+                                                      Age == 32 & court_position == "Front" ~ "Age32_Front"))
+wnba_graph <- wnba_final %>% filter(Age %in% quantile(wnba_final$Age, c(0.1,.5,0.9))) %>% mutate(age_court_pos = case_when(
+                                                      Age == 22 & court_position == "Back" ~ "Age22_Back",
+                                                      Age == 22 & court_position == "Front" ~ "Age22_Front",
+                                                      Age == 26 & court_position == "Back" ~ "Age26_Back",
+                                                      Age == 26 & court_position == "Front" ~ "Age26_Front",
+                                                      Age == 32 & court_position == "Back" ~ "Age32_Back",
+                                                      Age == 32 & court_position == "Front" ~ "Age32_Front"))
+```
+
+```{r}
+ggplot(wnba_graph, aes(x = Tm_Net_Rtg, y = PER, color = age_court_pos)) +
+  geom_point(alpha = 0.25) + 
+  geom_line(data = final_model_predict, aes(x = Tm_Net_Rtg, y = PER, color = age_court_pos), lwd = 0.75) +
+  xlab("Team Net Efficiency Rating") + 
+  ylab("Player Efficiency Rating") + 
+  ggtitle("WNBA Player Efficiency Rating as a function of Team Net \nEfficiency Rating, Age, and Court Position for 2000-2019") +
+    scale_color_manual(name = "Age / Court Position", labels = c("Age22_Back" = "22 / Back Court", "Age22_Front" = "22 / Front Court", "Age26_Back" = "26 / Back Court", "Age26_Front" = "26 / Front Court", "Age32_Back" = "32 / Back Court", "Age32_Front" = "32 / Front Court"), values = c("Age22_Back" = "red", "Age22_Front" = "darkgreen", "Age26_Back" = "blue", "Age26_Front" = "orange", "Age32_Back" = "lawngreen", "Age32_Front" = "cyan")) + theme_classic()
+```
+The points above represent actual observations, and the lines represent the final model predictions.  More detailed descriptions will be provided in the **Conclusion / Interpretation** section.
+
+# Conclusion / Interpretation
+
+Three variables were found to be significant predictors of Player Efficiency Rating: Age, Team Net Efficiency Rating, and Court Position.
+Their interpretations are found below.
+
+ - Age: The coefficient for age in the final model is 0.05.  This means that with team net efficiency rating and court position held constant, we would expect an increase of 0.05 in PER for each year increase in a player's age.  The visualization shows this as the two lines representing an age of 32 are the highest with the two lines representing 22 being the lowest, and the two lines representing 26 falling in the middle.  There are two lines representing each age to separate by court position.
+ - Team Net Efficiency Rating: The coefficient for team net efficiency rating is 0.15.  This means that with age and court position held constant, we would expect an increase of 0.15 in PER for each point of increase in team net efficiency rating.  This is indicated by the positive slopes of the line in the above visualization.
+ - Court Position: The coefficient for court position is 1.58.  Back court was used as the base level, so this means that with age and team net efficiency rating held constant we would expect front court players to have a PER 1.58 points higher than back court players of the same age and having the same team net efficiency rating.  This is shown in the above visualization by the gap between line clusters. The top 3 lines represent front court players at various ages, and the bottom three represent back court players at various ages.
+ 
+The above descriptions can be generalized in the following three statements.  With all else equal, we expect older players to produce higher PER scores, players on better teams to produce higher PER scores, and front court players to produce higher PER scores than back court players.
+
+
+
