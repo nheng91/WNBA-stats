@@ -19,6 +19,10 @@ library(kableExtra)
 library(catspec)
 library(olsrr)
 library(MASS)
+library(car)
+library(lindia)
+library(lmtest)
+
 ### almost_sas function from class
 almost_sas <- function(aov.results){
   aov_residuals <- residuals(aov.results)
@@ -27,6 +31,16 @@ almost_sas <- function(aov.results){
   hist(aov_residuals)
   plot(aov.results, which=2)
   plot(density(aov_residuals))
+}
+### p.value.string v2
+# by Reid Ginoza
+p.value.string = function(p.value){
+  p.value <- round(p.value, digits=4)
+  if (p.value == 0) {
+    return("p < 0.0001")
+  } else {
+    return(paste0("p = ", format(p.value, scientific = F)))
+  }
 }
 ```
 
@@ -164,11 +178,11 @@ Both the $AIC$ value and the $R_{adj}^2$ value for the full model are slightly b
 
 ```{r}
 student_res <- studres(wnba_full_mod)
-outlier_flag <- as.factor(ifelse(abs(student_res) > 3, "Outlier", "Normal"))
-student_res_df <- data.frame("obs" = 1:length(student_res), student_res, outlier_flag)
-student_res_outlier_df <- student_res_df %>% filter(outlier_flag == "Outlier")
-knitr::kable(table(outlier_flag), col.names = c("Obs. Type", "Freq")) %>% kable_styling(full_width = F, position = "left")
-ggplot(student_res_df, aes(x = obs, y = student_res, col = outlier_flag)) + 
+outlier_y_flag <- as.factor(ifelse(abs(student_res) > 3, "Outlier", "Normal"))
+student_res_df <- data.frame("obs" = 1:length(student_res), student_res, outlier_y_flag)
+student_res_outlier_df <- student_res_df %>% filter(outlier_y_flag == "Outlier")
+knitr::kable(table(outlier_y_flag), col.names = c("Obs. Type", "Freq")) %>% kable_styling(full_width = F, position = "left")
+ggplot(student_res_df, aes(x = obs, y = student_res, col = outlier_y_flag)) + 
   geom_point() + 
   geom_hline(yintercept = 3, color = "red") +
   geom_hline(yintercept = -3, color = "red") +
@@ -181,30 +195,83 @@ ggplot(student_res_df, aes(x = obs, y = student_res, col = outlier_flag)) +
 
 ### Outliers in X
 
-**Reduced Model #2 Estimate:**
-
-$\hat{Y_{\text{i,PER}}} = `r round(coef_red2[1], digits=2)` + `r round(coef_red2[2], digits=2)`X_{\text{i,Decade}} + `r round(coef_red2[3], digits=2)`X_{\text{i,CourtPosition}}$
-
-**Hypotheses**
-
-$H_0: \ \beta_{\text{Age}} = \beta_{\text{TeamNetRating}} = 0$ \
-$H_1:$ \ at least one of $\beta_{\text{Age}}$,$\beta_{\text{TeamNetRating}}$ is $\ne 0$ \
-
-**Anova for Reduced Model #1 vs Reduced Model #2**
-
-Since we know the interaction term not not be significant, **Reduced Model #1** will now be the model tested against. We will assume the interaction term has been dropped for the remainder of the analysis. The results of the above hypothesis test will be displayed in the anova output below.
-
 ```{r}
-(anova_red1 <- anova(wnba_reduced_mod2, wnba_reduced_mod1))
+p <- length(tidy(wnba_full_mod)$estimate)
+n <- nrow(wnba_final)
+outlier_x_cutoff <- (2*p)/n
+hat_values <- hatvalues(wnba_full_mod)
+outlier_x_flag <- as.factor(ifelse(abs(hat_values) > outlier_x_cutoff, "Outlier", "Normal"))
+hat_df <- data.frame("obs" = 1:length(hat_values), hat_values, outlier_x_flag)
+hat_outlier_df <- hat_df %>% filter(outlier_x_flag == "Outlier")
+knitr::kable(table(outlier_x_flag), col.names = c("Obs. Type", "Freq")) %>% kable_styling(full_width = F, position = "left")
+ggplot(hat_df, aes(x = obs, y = hat_values, col = outlier_x_flag)) + 
+  geom_point() + 
+  geom_hline(yintercept = outlier_x_cutoff, color = "red") +
+  geom_text(data = hat_outlier_df, aes(obs+70, hat_values, label = obs), show.legend = FALSE) +
+  scale_color_manual(values = c("black", "red")) + 
+  scale_y_continuous(breaks=round(c(0,0.0025,outlier_x_cutoff,0.005,0.0075,0.01),4)) + 
+  labs(x = "Observation", y = "Hat Value", color = "Observation Type") +
+  theme_classic()
 ```
 
+### Points of Influence/Leverage
+
+```{r}
+cooksd_threshold <- 4/n
+cooksd <- cooks.distance(wnba_full_mod)
+influential_flag <- as.factor(ifelse(abs(cooksd) > cooksd_threshold, "Influential", "Normal"))
+knitr::kable(table(influential_flag), col.names = c("Obs. Type", "Freq")) %>% kable_styling(full_width = F, position = "left")
+gg_cooksd(wnba_full_mod) + theme_classic()
+```
+
+### Observations that are Outliers in both X and Y and Influential
+
+```{r}
+observation_class_df <- data.frame("obs" = 1:length(hat_values), outlier_y_flag, outlier_x_flag, influential_flag)
+points_of_interest <- observation_class_df %>% filter(outlier_y_flag == "Outlier", influential_flag == "Influential") %>% pull(obs)
+wnba_rank_df <- wnba_final %>% mutate(PER_percentile = percent_rank(PER))
+wnba_rank_df$PER_percentile[points_of_interest]
+```
+
+## Multicollinearity
+
+We cannot include the interaction term when measuring collinearity, so the **Reduced Model** will be used to measure the variance inflation factors (vif) for each variable.
+
+```{r}
+vif(wnba_reduced_mod)
+```
+
+The vif value for each predictor is not considerably larger than 1 so none will be dropped from the model.
+
+## Regression Assumptions
+
+
+```{r}
+almost_sas(wnba_full_mod)
+```
+
+The normality assumptions of the residuals appears to hold.  The histogram and density plots look to be symmetrical and bellshaped around 0, and the qq-plot appears to fall on the 45 degree line, with a few outliers in the tails.  However, in the first residual plot there appears to maybe be some widening of the variance as the fitted values increase, but it is not clear.  I will use Breusch-Pagan tests to test for constancy of error variance on the continuous variables.  $\alpha = 0.05$ will be used to test for significance.  The hypotheses are as follows:
+
+### Hypotheses Tests for Constancy of Error Variance
+
+**Age**
+
+$H_0: \ \gamma_{\text{Age}} = 0$ \
+$H_1: \ \gamma_{\text{Age}} \ne 0$ \
+
+The results of the Breusch-Pagan test for age are shown below.
+
+```{r}
+wnba_Age <- lm(PER ~ Age, data = wnba_final)
+(bp_age <- bptest(wnba_Age, studentize = FALSE))
+```
 **Test Statistic**
 
-$F_0 = `r round(tidy(anova_red1)[2, 5], digits=4)`$
+$\chi_0^2 = `r round(unname(bp_age$statistic), digits=4)`$
 
 ***p*-value**
 
-$`r p.value.string(tidy(anova_red1)$p.value[2])`$
+$`r p.value.string(unname(bp_age$p.value))`$
 
 **Rejection Region**
 
@@ -212,74 +279,21 @@ Reject $H_0$ if $p < \alpha$; $\alpha = 0.05$
 
 **Conclusion and Interpretation**
 
-Reject $H_0$. There is sufficient evidence to suggest that at least one of the continuous predictors (age and team net efficiency rating) are a significant predictor of player efficiency rating.  Both predictors cannot be simultaneously dropped from the model. 
+Fail to reject $H_0$. There is not sufficient evidence to suggest that the variance assumption is broken for age as a predictor.  Age is safe to leave as is in the **Full Model**.
 
-### Hypothesis Test on Dropping Decade
+**Team Net Rating**
 
-Given the results of the last test, the working model is still **Reduced Model #1**. I will now attempt to drop variables from the model one at a time based on their descending p-values.  From the **Reduced Model #1** output we see decade has the highest p-value, $`r p.value.string(tidy(wnba_reduced_mod1)$p.value[2])`$. The reduced form of the model that does not include decade is shown below.
+$H_0: \ \gamma_{\text{Team Net Rating}} = 0$ \
+$H_1: \ \gamma_{\text{Team Net Rating}} \ne 0$ \
 
-$\hat{Y_{\text{i,PER}}} = b_0 + b_{\text{CourtPosition}}X_{\text{i,CourtPosition}} + b_{\text{TeamNetRating}}X_{\text{i,TeamNetRating}} + b_{\text{Age}}X_{\text{i,Age}}$
-
-A summary of the third reduced multiple linear regression model (**Reduced Model #3**) and the resulting model fit are given below.
-
-```{r}
-wnba_reduced_mod3 <- lm(PER ~ court_position + Tm_Net_Rtg + Age, data = wnba_final)
-coef_red3 <- tidy(wnba_reduced_mod3)$estimate
-summary(wnba_reduced_mod3)
-```
-
-**Reduced Model #3 Estimate:**
-
-$\hat{Y_{\text{i,PER}}} = `r round(coef_red3[1], digits=2)` + `r round(coef_red3[2], digits=2)`X_{\text{i,CourtPosition}} + `r round(coef_red3[3], digits=2)`X_{\text{i,TeamNetRating}} + `r round(coef_red3[4], digits=2)`X_{\text{i,Age}}$
-
-**Hypotheses**
-
-$H_0: \ \beta_{\text{Decade}} = 0$ \
-$H_1: \ \beta_{\text{Decade}} \ne 0$ \
-
-**Anova for Reduced Model #1 vs Reduced Model #3**
-
-The results of the above hypothesis test will be displayed in the anova output below.
+The results of the Breusch-Pagan test for team net rating are shown below.
 
 ```{r}
-(anova_red2 <- anova(wnba_reduced_mod3, wnba_reduced_mod1))
+wnba_TNR <- lm(PER ~ Tm_Net_Rtg, data = wnba_final)
+(bp_TNR <- bptest(wnba_TNR, studentize = FALSE))
 ```
 
-**Test Statistic**
-
-$F_0 = `r round(tidy(anova_red2)[2, 5], digits=4)`$
-
-***p*-value**
-
-$`r p.value.string(tidy(anova_red2)$p.value[2])`$
-
-**Rejection Region**
-
-Reject $H_0$ if $p < \alpha$; $\alpha = 0.05$
-
-**Conclusion and Interpretation**
-
-Fail to reject $H_0$. There is not sufficient evidence to suggest that decade is not a significant predictor of player efficiency rating.  **Reduced Model #3** will now be the working model and we will assume decade to be dropped for the remainder of the analysis.
-
-## Final Model
-
-The output from **Reduced Model #3** shows each predictor to be significant at $\alpha = 0.05$, so we will use this as the **Final Model.**  The **Final Model** form is:
-
-$\hat{Y_{\text{i,PER}}} = b_0 + b_{\text{CourtPosition}}X_{\text{i,CourtPosition}} + b_{\text{TeamNetRating}}X_{\text{i,TeamNetRating}} + b_{\text{Age}}X_{\text{i,Age}}$
-
-The summary output and **Final Model** estimate are shown below.  The p-values for each predictor are shown in the **'Pr(>|t|)'** column of the summary output, and they are all significant as mentioned above.
-
-```{r}
-final_model <- lm(PER ~ court_position + Tm_Net_Rtg + Age, data = wnba_final)
-coef_final <- tidy(final_model)$estimate
-summary(final_model)
-```
-
-**Final Model Estimate:**
-
-$\hat{Y_{\text{i,PER}}} = `r round(coef_red3[1], digits=2)` + `r round(coef_red3[2], digits=2)`X_{\text{i,CourtPosition}} + `r round(coef_red3[3], digits=2)`X_{\text{i,TeamNetRating}} + `r round(coef_red3[4], digits=2)`X_{\text{i,Age}}$
-
-# Data Visualization
+## Next Steps
 
 The final model predicts PER as a function of 3 variables (Team Net Efficiency Rating, Age, and Court position), 2 of which are continuous (Team Net Efficiency Rating and Age). Two continuous variables complicates the ability to represent the full model graphically.  Therefore, Age will be treated as a categorical variable in the visualization with breakpoints at the 10th, 50th, and 90th percentile to demonstrate the movement as age increases.  Typically, I would use the 25th, 50th, and 75th percentiles for breakpoints, but they did not create enough visual separation when displayed in the final output.  The visualization of the **Final Model** is shown below.
 
