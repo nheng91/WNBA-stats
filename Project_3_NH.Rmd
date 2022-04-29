@@ -172,9 +172,15 @@ Both the $AIC$ value and the $R_{adj}^2$ value for the full model are slightly b
 
 # Model Diagnostics
 
+Using the full model, I will attempt to identify any outliers and influential points within the data, whether or not the model contains multicollinearity, and whether or not the model meets the appropriate assumptions associated with a linear regression. 
+
 ## Outliers
 
+An observation can be an outlier in either the predictor variable, response variable, or both variables.
+
 ### Outliers in Y
+
+The below code seeks to find any outliers in the response variable, **PER**.
 
 ```{r}
 student_res <- studres(wnba_full_mod)
@@ -193,7 +199,11 @@ ggplot(student_res_df, aes(x = obs, y = student_res, col = outlier_y_flag)) +
   theme_classic()
 ```
 
+16 observations are identified as potential outliers in the response variable.  They are shown in red in the above graph.
+
 ### Outliers in X
+
+The below code seeks to find any outliers in the predictor variables.
 
 ```{r}
 p <- length(tidy(wnba_full_mod)$estimate)
@@ -214,7 +224,25 @@ ggplot(hat_df, aes(x = obs, y = hat_values, col = outlier_x_flag)) +
   theme_classic()
 ```
 
+67 observations are identified as potential outliers in the predictor variables.  They are shown in red in the above graph.
+
+### Outliers in Both X and Y
+
+The below code seeks to discover the intersection of predictor and response outliers.
+
+```{r}
+outlier_df <- data.frame("obs" = 1:length(hat_values), outlier_x_flag, outlier_y_flag)
+outliers_x_y <- outlier_df %>% filter(outlier_x_flag == "Outlier",  outlier_y_flag == "Outlier") %>% pull(obs)
+both_outliers <- length(outliers_x_y)
+names(both_outliers) <- "Number of Outliers in Both X & Y"
+knitr::kable(length(outliers_x_y), col.names = "Number of Outliers in Both X & Y") %>% kable_styling(full_width = F, position = "left")
+```
+
+The above table shows that there are no observations that are ooutliers in both the predictors and the response.
+
 ### Points of Influence/Leverage
+
+The below code seeks to determine and points of influence based on Cook's Distance.  Influential points can have a disproportiante efect on the model estimate.
 
 ```{r}
 cooksd_threshold <- 4/n
@@ -224,14 +252,24 @@ knitr::kable(table(influential_flag), col.names = c("Obs. Type", "Freq")) %>% ka
 gg_cooksd(wnba_full_mod) + theme_classic()
 ```
 
+145 observations are identified as potentially influential.  They are shown in red in the above graph.
+
 ### Observations that are Outliers in both X and Y and Influential
+
+There are a high number of points observed to be outliers in the predictor variables, outliers in the response variable, or influential.
+The below code seeks to discover the overlap between outliers and influential points.  We already know there are no points that are outliers in both predictor and response.
 
 ```{r}
 observation_class_df <- data.frame("obs" = 1:length(hat_values), outlier_y_flag, outlier_x_flag, influential_flag)
-points_of_interest <- observation_class_df %>% filter(outlier_y_flag == "Outlier", influential_flag == "Influential") %>% pull(obs)
-wnba_rank_df <- wnba_final %>% mutate(PER_percentile = percent_rank(PER))
-wnba_rank_df$PER_percentile[points_of_interest]
+points_of_interest_x <- observation_class_df %>% filter(outlier_x_flag == "Outlier", influential_flag == "Influential") %>% pull(obs)
+knitr::kable(length(points_of_interest_x), col.names = "Number of Outliers in X that are also Influential") %>% kable_styling(full_width = F, position = "left")
+points_of_interest_y <- observation_class_df %>% filter(outlier_y_flag == "Outlier", influential_flag == "Influential") %>% pull(obs)
+knitr::kable(length(points_of_interest_y), col.names = "Number of Outliers in Y that are also Influential") %>% kable_styling(full_width = F, position = "left")
+points_of_interest <- length(points_of_interest_y)+length(points_of_interest_x)
+knitr::kable(points_of_interest, col.names = "Number of Outliers that are also Influential") %>% kable_styling(full_width = F, position = "left")
 ```
+
+There appears to be 31 total points of interest.  16 are outliers in the response variable, and 15 are outliers in the predictor variables.
 
 ## Multicollinearity
 
@@ -293,52 +331,27 @@ wnba_TNR <- lm(PER ~ Tm_Net_Rtg, data = wnba_final)
 (bp_TNR <- bptest(wnba_TNR, studentize = FALSE))
 ```
 
+**Test Statistic**
+
+$\chi_0^2 = `r round(unname(bp_TNR$statistic), digits=4)`$
+
+***p*-value**
+
+$`r p.value.string(unname(bp_TNR$p.value))`$
+
+**Rejection Region**
+
+Reject $H_0$ if $p < \alpha$; $\alpha = 0.05$
+
+**Conclusion and Interpretation**
+
+Reject $H_0$. There is sufficient evidence to suggest that the variance assumption is broken for team net rating as a predictor.  A transformation to team net rating may need to be considered.
+
 ## Next Steps
 
-The final model predicts PER as a function of 3 variables (Team Net Efficiency Rating, Age, and Court position), 2 of which are continuous (Team Net Efficiency Rating and Age). Two continuous variables complicates the ability to represent the full model graphically.  Therefore, Age will be treated as a categorical variable in the visualization with breakpoints at the 10th, 50th, and 90th percentile to demonstrate the movement as age increases.  Typically, I would use the 25th, 50th, and 75th percentiles for breakpoints, but they did not create enough visual separation when displayed in the final output.  The visualization of the **Final Model** is shown below.
-
-```{r}
-final_model_predict <- expand.grid("court_position" = levels(as.factor(wnba_final$court_position)),
-                                   "Tm_Net_Rtg" = seq(-20, 20, length.out = 201),
-                                   "Age" = quantile(wnba_final$Age, c(0.1,.5,0.9))) 
-final_model_predict$PER <- predict(final_model, newdata = final_model_predict)
-final_model_predict <- final_model_predict %>% mutate(age_court_pos = case_when(
-                                                      Age == 22 & court_position == "Back" ~ "Age22_Back",
-                                                      Age == 22 & court_position == "Front" ~ "Age22_Front",
-                                                      Age == 26 & court_position == "Back" ~ "Age26_Back",
-                                                      Age == 26 & court_position == "Front" ~ "Age26_Front",
-                                                      Age == 32 & court_position == "Back" ~ "Age32_Back",
-                                                      Age == 32 & court_position == "Front" ~ "Age32_Front"))
-wnba_graph <- wnba_final %>% filter(Age %in% quantile(wnba_final$Age, c(0.1,.5,0.9))) %>% mutate(age_court_pos = case_when(
-                                                      Age == 22 & court_position == "Back" ~ "Age22_Back",
-                                                      Age == 22 & court_position == "Front" ~ "Age22_Front",
-                                                      Age == 26 & court_position == "Back" ~ "Age26_Back",
-                                                      Age == 26 & court_position == "Front" ~ "Age26_Front",
-                                                      Age == 32 & court_position == "Back" ~ "Age32_Back",
-                                                      Age == 32 & court_position == "Front" ~ "Age32_Front"))
-```
-
-```{r}
-ggplot(wnba_graph, aes(x = Tm_Net_Rtg, y = PER, color = age_court_pos)) +
-  geom_point(alpha = 0.25) + 
-  geom_line(data = final_model_predict, aes(x = Tm_Net_Rtg, y = PER, color = age_court_pos), lwd = 0.75) +
-  xlab("Team Net Efficiency Rating") + 
-  ylab("Player Efficiency Rating") + 
-  ggtitle("WNBA Player Efficiency Rating as a function of Team Net \nEfficiency Rating, Age, and Court Position for 2000-2019") +
-    scale_color_manual(name = "Age / Court Position", labels = c("Age22_Back" = "22 / Back Court", "Age22_Front" = "22 / Front Court", "Age26_Back" = "26 / Back Court", "Age26_Front" = "26 / Front Court", "Age32_Back" = "32 / Back Court", "Age32_Front" = "32 / Front Court"), values = c("Age22_Back" = "red", "Age22_Front" = "darkgreen", "Age26_Back" = "blue", "Age26_Front" = "orange", "Age32_Back" = "lawngreen", "Age32_Front" = "cyan")) + theme_classic()
-```
-The points above represent actual observations, and the lines represent the final model predictions.  More detailed descriptions will be provided in the **Conclusion / Interpretation** section.
 
 # Conclusion / Interpretation
 
-Three variables were found to be significant predictors of Player Efficiency Rating: Age, Team Net Efficiency Rating, and Court Position.
-Their interpretations are found below.
-
- - Age: The coefficient for age in the final model is 0.05.  This means that with team net efficiency rating and court position held constant, we would expect an increase of 0.05 in PER for each year increase in a player's age.  The visualization shows this as the two lines representing an age of 32 are the highest with the two lines representing 22 being the lowest, and the two lines representing 26 falling in the middle.  There are two lines representing each age to separate by court position.
- - Team Net Efficiency Rating: The coefficient for team net efficiency rating is 0.15.  This means that with age and court position held constant, we would expect an increase of 0.15 in PER for each point of increase in team net efficiency rating.  This is indicated by the positive slopes of the line in the above visualization.
- - Court Position: The coefficient for court position is 1.58.  Back court was used as the base level, so this means that with age and team net efficiency rating held constant we would expect front court players to have a PER 1.58 points higher than back court players of the same age and having the same team net efficiency rating.  This is shown in the above visualization by the gap between line clusters. The top 3 lines represent front court players at various ages, and the bottom three represent back court players at various ages.
- 
-The above descriptions can be generalized in the following three statements.  With all else equal, we expect older players to produce higher PER scores, players on better teams to produce higher PER scores, and front court players to produce higher PER scores than back court players.
 
 
 
